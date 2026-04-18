@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import ChatBot from "./src/ChatBot.jsx";
 
 /* ═══════════════════════════════════════════════════════════════════════════
    PROVIDER CONFIGURATION — reads from .env (VITE_ prefix for client-side)
@@ -260,7 +261,7 @@ QUALITY CHECKLIST (verify before outputting):
 /* ═══════════════════════════════════════════════════════════════════════════
    ENHANCED USER PROMPT BUILDER
    ═══════════════════════════════════════════════════════════════════════════ */
-const buildUserPrompt = (jobInput, notes, hasPDF) => {
+const buildUserPrompt = (jobInput, notes, hasPDF, chatContext = "") => {
   const sections = [];
 
   if (hasPDF) {
@@ -284,6 +285,15 @@ ${jobInput?.trim() || "Not specified — infer the best possible role from any c
 
   sections.push(`ADDITIONAL PERSONAL NOTES / INFO:
 ${notes?.trim() || "None provided"}`);
+
+  if (chatContext) {
+    sections.push(`CAREER ADVISOR INTERVIEW — CRITICAL CONTEXT:
+The candidate completed a detailed interview with our career advisor before this generation.
+Use ALL information from this transcript to make the resume as personalized and accurate as possible.
+Prioritize information from this interview over generic assumptions.
+
+${chatContext}`);
+  }
 
   sections.push(`FINAL INSTRUCTIONS:
 1. Generate the COMPLETE LaTeX document — from \\documentclass to \\end{document}
@@ -375,6 +385,7 @@ export default function ResumeForge() {
   const [copied, setCopied] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [chatContext, setChatContext] = useState("");
   const fileRef = useRef();
   const progressRef = useRef();
 
@@ -417,7 +428,30 @@ export default function ResumeForge() {
     setProgress(100);
   };
 
-  const generate = async () => {
+  const startChat = () => {
+    if (!jobInput.trim() && !pdfBase64 && !notes.trim()) {
+      setError("Please provide a job title, description, or upload your resume to get started.");
+      return;
+    }
+    const activeProvider = PROVIDERS[provider];
+    if (!activeProvider?.apiKey) {
+      setError(`Missing API key for ${activeProvider?.label || provider}. Set VITE_${provider.toUpperCase()}_API_KEY in your .env file.`);
+      return;
+    }
+    setError("");
+    setView("chat");
+  };
+
+  const handleChatReady = (transcript) => {
+    setChatContext(transcript);
+    generate(transcript);
+  };
+
+  const handleChatSkip = () => {
+    generate("");
+  };
+
+  const generate = async (chatCtx = "") => {
     if (!jobInput.trim() && !pdfBase64 && !notes.trim()) {
       setError("Please provide a job title, description, or upload your resume to get started.");
       return;
@@ -441,7 +475,7 @@ export default function ResumeForge() {
           source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
         });
       }
-      content.push({ type: "text", text: buildUserPrompt(jobInput, notes, !!pdfBase64) });
+      content.push({ type: "text", text: buildUserPrompt(jobInput, notes, !!pdfBase64, chatCtx) });
 
       let raw;
       if (provider === "anthropic") {
@@ -473,6 +507,7 @@ export default function ResumeForge() {
   const reset = () => {
     setView("input");
     setOutput({ ats: "", latex: "", tips: "" });
+    setChatContext("");
     setError("");
     setProgress(0);
   };
@@ -650,17 +685,39 @@ export default function ResumeForge() {
             )}
 
             <button
-              onClick={generate}
+              onClick={startChat}
               className="btn-gold"
               style={{ width: "100%", background: "#c9991a", color: "#000", border: "none", borderRadius: 3, padding: "1rem", fontSize: 14, fontWeight: 700, letterSpacing: "0.15em", textTransform: "uppercase", cursor: "pointer", fontFamily: "'Georgia', serif" }}
             >
-              Generate My Resume →
+              Start Career Advisor Chat →
+            </button>
+
+            <button
+              onClick={() => { setError(""); generate(""); }}
+              className="btn-ghost"
+              style={{ width: "100%", marginTop: "0.5rem", background: "transparent", border: "1px solid #2a2a2a", color: "#555", padding: "0.75rem", borderRadius: 3, cursor: "pointer", fontSize: 12, letterSpacing: "0.05em", fontFamily: "inherit" }}
+            >
+              Skip Chat & Generate Directly
             </button>
 
             <p style={{ textAlign: "center", color: "#333", fontSize: 11, marginTop: "1rem" }}>
-              Works best with a job description + PDF resume · Output is Overleaf-ready LaTeX
+              The advisor chat helps create a more personalized resume · You can skip if in a hurry
             </p>
           </div>
+        )}
+
+        {/* ══════════ CHAT VIEW ══════════ */}
+        {view === "chat" && (
+          <ChatBot
+            provider={PROVIDERS[provider]}
+            jobInput={jobInput}
+            notes={notes}
+            pdfBase64={pdfBase64}
+            pdfName={pdfName}
+            onReady={handleChatReady}
+            onBack={() => { setView("input"); setError(""); }}
+            onSkip={handleChatSkip}
+          />
         )}
 
         {/* ══════════ GENERATING VIEW ══════════ */}
