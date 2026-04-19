@@ -189,11 +189,20 @@ ATS REVERSE-ENGINEERING RULES (CRITICAL — follow ALL):
 
 12. CONTENT GENERATION RULES:
     • If PDF resume provided: extract ALL content and ENHANCE every bullet with stronger verbs, metrics, and JD keywords
-    • If no resume provided: generate REALISTIC, PLAUSIBLE example content with "% EXAMPLE — REPLACE" comment on every generated entry
+    • If no resume provided: generate REALISTIC, PLAUSIBLE example content with a "% EXAMPLE — REPLACE" comment on a SEPARATE LINE above every generated entry (never inline inside \\resumeItem{})
     • If notes provide personal info (name, email, phone, LinkedIn, GitHub): use them exactly
     • If no personal info: use [YOUR NAME], [your.email@domain.com], [Your Phone], [linkedin.com/in/yourprofile], [github.com/yourusername]
     • Never invent specific company names unless provided; use [Company Name] placeholders
     • Never fabricate specific degree institutions unless provided; use [University Name]
+
+13. CRITICAL — LATEX SPECIAL CHARACTER ESCAPING (violations cause compile errors):
+    • & → \\& in ALL text content (company names, bullet text, skills). Bare & is ONLY for tabular column separators.
+    • % → \\% in ALL text content. Bare % means "start of comment" — the rest of the line will vanish!
+    • $ → \\$ for currency amounts (e.g., \\$1.2M). Bare $ toggles math mode.
+    • # → \\# in all text. Bare # is only for macro parameters in \\newcommand.
+    • _ → \\_ in text. Bare _ is only for subscripts in math mode.
+    • WRONG: \\resumeItem{Saved company $500K by reducing R&D costs by 25%}
+    • RIGHT: \\resumeItem{Saved company \\$500K by reducing R\\&D costs by 25\\%}
 
 ─────────────────────────────────────────────
 LATEX TEMPLATE STRUCTURE:
@@ -253,6 +262,7 @@ QUALITY CHECKLIST (verify before outputting):
 □ Dates are consistent format throughout
 □ Skills section covers all JD requirements
 □ LaTeX compiles without errors
+□ All special characters escaped in text: & → \\&, % → \\%, $ → \\$, # → \\#, _ → \\_
 □ Single-column, no graphics, ATS-parse-safe
 □ Total resume length: 1-2 pages (senior+: 2 pages OK)
 □ \\pdfgentounicode=1 is included for Unicode extraction
@@ -271,12 +281,12 @@ I have attached my previous resume as a PDF. You MUST:
 2. Preserve all factual content (dates, company names, titles, metrics) exactly as written
 3. ENHANCE every bullet point by: adding stronger power verbs, injecting JD keywords naturally, adding/improving quantified metrics, restructuring to CAR format
 4. Re-order skills sections to prioritize JD-relevant technologies
-5. If my resume has weak or missing metrics, infer realistic ones based on the role/project scope and mark them with % VERIFY
+5. If my resume has weak or missing metrics, infer realistic ones based on the role/project scope and mark them with a LaTeX comment on its OWN SEPARATE LINE above the item: % VERIFY: [reason]. NEVER put % VERIFY inside \resumeItem{} text — it will break compilation.
 6. Add any JD-required skills I possess (inferred from my experience) that are missing from my resume`);
   } else {
     sections.push(`NO RESUME ATTACHED — GENERATION MODE:
 Generate realistic, plausible example content for a strong candidate at the appropriate seniority level.
-Mark EVERY generated entry with: % EXAMPLE — REPLACE WITH YOUR REAL EXPERIENCE
+Mark EVERY generated entry with a LaTeX comment on its OWN SEPARATE LINE above the entry: % EXAMPLE — REPLACE WITH YOUR REAL EXPERIENCE. NEVER put this marker inside \resumeItem{} text.
 Generate 4-5 job positions with realistic progression, each with project sub-headings and quantified bullets.`);
   }
 
@@ -303,9 +313,129 @@ ${chatContext}`);
 5. Skills section must cover ALL technologies/tools mentioned in the JD
 6. Use both acronyms and full forms for all technical terms
 7. Professional Summary must mirror the EXACT job title from the JD
-8. Output must compile cleanly in Overleaf with no errors`);
+8. Output must compile cleanly in Overleaf with no errors
+
+CRITICAL — LATEX SPECIAL CHARACTER ESCAPING:
+You MUST escape ALL special characters in text content. LaTeX will FAIL to compile if you don't:
+• & must be written as \\& in ALL text (company names, bullets, skills). Only use bare & inside tabular column specs.
+• % must be written as \\% in ALL text content. Only use bare % for LaTeX comments (lines starting with %).
+  - WRONG: "reduced costs by 30%" inside \\resumeItem → causes everything after % to be treated as comment
+  - RIGHT: "reduced costs by 30\\%" inside \\resumeItem
+• $ must be written as \\$ when referring to currency (e.g., \\$1.2M savings). Only use bare $ for math mode.
+• # must be written as \\# in text. Only use bare # inside \\newcommand definitions for parameters.
+• _ must be written as \\_ in text unless inside math mode or \\href URLs.
+• { and } are only for LaTeX grouping. In text use \\{ and \\}.
+• ~ is a non-breaking space in LaTeX. Use \\textasciitilde{} if you need a literal tilde in text.
+• ^ is superscript. Use \\textasciicircum{} if you need a literal caret in text.
+DOUBLE CHECK: Before outputting, scan every \\resumeItem, \\textbf, and heading for unescaped &, %, $, #, _ characters.`);
 
   return sections.join("\n\n");
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   LATEX SANITIZER — Fix common LaTeX special character issues
+   ═══════════════════════════════════════════════════════════════════════════ */
+const sanitizeLatex = (latex) => {
+  if (!latex) return latex;
+
+  // Split into lines for line-by-line processing
+  const lines = latex.split("\n");
+  const sanitized = lines.map((line) => {
+    // Skip lines that are LaTeX commands/preamble (start with \)
+    const trimmed = line.trim();
+
+    // Skip comment lines entirely (% at start of trimmed line)
+    if (trimmed.startsWith("%")) return line;
+
+    // Skip lines that are pure LaTeX structural commands
+    if (/^\\(documentclass|usepackage|begin|end|newcommand|renewcommand|setlength|addtolength|definecolor|titleformat|pagestyle|fancyhf|fancyfoot|urlstyle|raggedbottom|raggedright|pdfgentounicode|input|section|resumeSubHeadingListStart|resumeSubHeadingListEnd|resumeItemListStart|resumeItemListEnd)\b/.test(trimmed)) {
+      return line;
+    }
+
+    // For content lines, fix unescaped special characters
+    // Process the line in segments — skip anything inside \command{} patterns and \href{} URLs
+    let result = "";
+    let i = 0;
+    while (i < line.length) {
+      // Skip backslash-escaped characters (already escaped properly)
+      if (line[i] === "\\" && i + 1 < line.length) {
+        result += line[i] + line[i + 1];
+        i += 2;
+        continue;
+      }
+
+      // Fix unescaped & in text content (but not in tabular alignment like l@{})
+      if (line[i] === "&") {
+        // Check if this is inside a tabular spec (l@{\extracolsep...}r) — leave alone
+        if (/\\begin\{tabular/.test(line) || /\\extracolsep/.test(line) || /l@\{/.test(line)) {
+          result += "&";
+        } else {
+          result += "\\&";
+        }
+        i++;
+        continue;
+      }
+
+      // Fix unescaped % in text (but not comment % at end of line / commands)
+      if (line[i] === "%") {
+        // If it's preceded by whitespace or at start and followed by text that looks like a comment, leave as comment
+        const before = line.substring(0, i);
+        const isInTextContent = /\\resumeItem\{|\\textbf\{|\\text/.test(before) &&
+          (before.match(/\{/g) || []).length > (before.match(/\}/g) || []).length;
+        if (isInTextContent) {
+          result += "\\%";
+        } else {
+          result += "%";
+        }
+        i++;
+        continue;
+      }
+
+      // Fix unescaped # in text content
+      if (line[i] === "#") {
+        const before = line.substring(0, i);
+        const isInDefinition = /\\newcommand|\\renewcommand/.test(line);
+        if (!isInDefinition) {
+          const isInTextContent = /\\resumeItem\{|\\textbf\{/.test(before) &&
+            (before.match(/\{/g) || []).length > (before.match(/\}/g) || []).length;
+          if (isInTextContent) {
+            result += "\\#";
+            i++;
+            continue;
+          }
+        }
+        result += "#";
+        i++;
+        continue;
+      }
+
+      // Fix unescaped $ in text content (not math mode)
+      if (line[i] === "$") {
+        const before = line.substring(0, i);
+        const isInTextContent = /\\resumeItem\{|\\textbf\{/.test(before) &&
+          (before.match(/\{/g) || []).length > (before.match(/\}/g) || []).length;
+        // Check if it looks like a currency amount (e.g., $50M, $1.2B)
+        if (isInTextContent && /\d/.test(line[i + 1])) {
+          result += "\\$";
+          i++;
+          continue;
+        }
+        result += "$";
+        i++;
+        continue;
+      }
+
+      // Fix unescaped ~ used as text (not as non-breaking space in LaTeX)
+      // Leave ~ alone as it's commonly used intentionally in LaTeX
+
+      result += line[i];
+      i++;
+    }
+
+    return result;
+  });
+
+  return sanitized.join("\n");
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -386,6 +516,7 @@ export default function ResumeForge() {
   const [showNotes, setShowNotes] = useState(false);
   const [progress, setProgress] = useState(0);
   const [chatContext, setChatContext] = useState("");
+  const [questionMode, setQuestionMode] = useState("standard");
   const fileRef = useRef();
   const progressRef = useRef();
 
@@ -408,8 +539,15 @@ export default function ResumeForge() {
 
   const parseOutput = (text) => {
     const ats = text.match(/##\s*ATS_ANALYSIS\s*([\s\S]*?)(?=##\s*LATEX_CODE|##\s*TIPS|$)/i)?.[1]?.trim() || "";
-    const latex = text.match(/##\s*LATEX_CODE\s*([\s\S]*?)(?=##\s*TIPS|$)/i)?.[1]?.trim() || text;
+    let latex = text.match(/##\s*LATEX_CODE\s*([\s\S]*?)(?=##\s*TIPS|$)/i)?.[1]?.trim() || text;
     const tips = text.match(/##\s*TIPS\s*([\s\S]*?)$/i)?.[1]?.trim() || "";
+
+    // Strip markdown code fences if present
+    latex = latex.replace(/^```(?:latex|tex)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+
+    // Sanitize LaTeX special characters
+    latex = sanitizeLatex(latex);
+
     return { ats, latex, tips };
   };
 
@@ -678,6 +816,44 @@ export default function ResumeForge() {
               )}
             </div>
 
+            {/* ── QUESTION MODE SELECTOR ── */}
+            <div style={{ marginBottom: "2rem" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11, letterSpacing: "0.15em", color: "#c9991a", marginBottom: "0.75rem", textTransform: "uppercase" }}>
+                <span style={{ width: 18, height: 18, border: "1px solid #c9991a", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9 }}>4</span>
+                Interview Depth
+              </label>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {[
+                  { id: "express", label: "Express", desc: "3–4 questions · Just the essentials", icon: "⚡" },
+                  { id: "standard", label: "Standard", desc: "6–8 questions · Balanced coverage", icon: "◈" },
+                  { id: "detailed", label: "Detailed", desc: "10–12 questions · Deep dive", icon: "◆" },
+                ].map((mode) => (
+                  <button
+                    key={mode.id}
+                    onClick={() => setQuestionMode(mode.id)}
+                    style={{
+                      flex: "1 1 0",
+                      minWidth: 140,
+                      background: questionMode === mode.id ? "#1a1508" : "#0a0a0a",
+                      border: `1px solid ${questionMode === mode.id ? "#c9991a" : "#222"}`,
+                      borderRadius: 3,
+                      padding: "0.85rem 1rem",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      transition: "all 0.2s",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                      <span style={{ fontSize: 14 }}>{mode.icon}</span>
+                      <span style={{ fontSize: 13, color: questionMode === mode.id ? "#c9991a" : "#888", fontWeight: 600 }}>{mode.label}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: questionMode === mode.id ? "#8a7a5a" : "#444", lineHeight: 1.4 }}>{mode.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
             {error && (
               <div style={{ background: "#110505", border: "1px solid #3a1515", borderRadius: 3, padding: "0.75rem 1rem", color: "#c55", fontSize: 13, marginBottom: "1rem" }}>
                 ⚠ {error}
@@ -714,6 +890,7 @@ export default function ResumeForge() {
             notes={notes}
             pdfBase64={pdfBase64}
             pdfName={pdfName}
+            questionMode={questionMode}
             onReady={handleChatReady}
             onBack={() => { setView("input"); setError(""); }}
             onSkip={handleChatSkip}
